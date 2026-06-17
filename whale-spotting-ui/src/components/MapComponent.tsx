@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './MapComponent.css'
+import { useLandCheck } from '../hooks/useLandCheck'
 
 interface ClientConnection {
   identity: string
@@ -142,6 +143,8 @@ function checkIfWaterByTile(lat: number, lng: number, zoom: number = 12): Promis
 }
 
 export default function MapComponent({ client, username }: { client: ClientConnection | null; username: string }) {
+  const { isSea: isSeaLandCheck, isLoading: lcLoading } = useLandCheck()
+  const [useTrifoldToggle, setUseTrifoldToggle] = useState(false)
    const mapRef = useRef<L.Map | null>(null)
    const markersRef = useRef<Map<number, L.Marker>>(new Map())
    const userPinMarkersRef = useRef<Map<string, L.Marker>>(new Map())
@@ -150,6 +153,14 @@ export default function MapComponent({ client, username }: { client: ClientConne
    const [sightings, setSightings] = useState<Sighting[]>([])
    const [userPins, setUserPins] = useState<UserPin[]>([])
   const [message, setMessage] = useState<string>('Click on the map to place a sighting pin')
+  
+  // Unified water check that dispatches to tile or Trifold landcheck method
+  const checkIfWater = useCallback(async (lat: number, lng: number, zoom: number): Promise<boolean> => {
+    if (useTrifoldToggle) {
+      return isSeaLandCheck(lat, lng)
+    }
+    return checkIfWaterByTile(lat, lng, zoom)
+  }, [useTrifoldToggle, isSeaLandCheck])
 
   useEffect(() => {
     if (!mapRef.current) {
@@ -190,7 +201,7 @@ export default function MapComponent({ client, username }: { client: ClientConne
 
       setMessage('Checking if location is water...')
 
-      const isWater = await checkIfWaterByTile(lat, lng, mapRef.current!.getZoom())
+      const isWater = await checkIfWater(lat, lng, mapRef.current!.getZoom())
 
       if (!isWater) {
         setMessage('This location is on land. Please click on water (ocean).')
@@ -422,7 +433,7 @@ export default function MapComponent({ client, username }: { client: ClientConne
 
          marker.on('dragend', async () => {
            const newPos = marker.getLatLng()
-           const waterCheck = await checkIfWaterByTile(newPos.lat, newPos.lng, mapRef.current!.getZoom())
+           const waterCheck = await checkIfWater(newPos.lat, newPos.lng, mapRef.current!.getZoom())
            if (waterCheck) {
              setUserPins((prev) =>
                prev.map((p) => (p.id === pin.id ? { ...p, lat: newPos.lat, lng: newPos.lng } : p))
@@ -737,7 +748,7 @@ export default function MapComponent({ client, username }: { client: ClientConne
           if (isOwner) {
             marker.on('dragend', async () => {
               const newPos = marker.getLatLng()
-              const waterCheck = await checkIfWaterByTile(newPos.lat, newPos.lng, mapRef.current!.getZoom())
+              const waterCheck = await checkIfWater(newPos.lat, newPos.lng, mapRef.current!.getZoom())
               if (waterCheck) {
                 const locationDisplay = document.getElementById(`sighting-location-${sighting.id}`)
                 if (locationDisplay && marker.isPopupOpen()) {
@@ -1013,6 +1024,19 @@ export default function MapComponent({ client, username }: { client: ClientConne
       <div id="map" className="map"></div>
       <div className="sighting-list">
         <h3>Recent Sightings ({sightings.length})</h3>
+        <div className="landcheck-toggle">
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={useTrifoldToggle}
+              onChange={(e) => setUseTrifoldToggle(e.target.checked)}
+            />
+            <span className="toggle-slider"></span>
+            <span className="toggle-text">
+              {useTrifoldToggle ? 'Trifold' : 'Tile'}{lcLoading && useTrifoldToggle ? ' (loading...)' : ''}
+            </span>
+          </label>
+        </div>
         <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 1rem 0' }}>{message}</p>
         <div className="sightings-scroll">
           {sightings.length === 0 ? (
