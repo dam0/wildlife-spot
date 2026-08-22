@@ -7,12 +7,13 @@ pub struct User {
     pub username: String,
 }
 
-#[spacetimedb::table(name = "whale_species", accessor = whale_species, public)]
-pub struct WhaleSpecies {
+#[spacetimedb::table(name = "species", accessor = species, public)]
+pub struct Species {
     #[primary_key]
     pub id: u32,
     pub name: String,
     pub scientific_name: String,
+    pub category: String,
 }
 
 #[spacetimedb::table(name = "sighting", accessor = sighting, public)]
@@ -41,7 +42,7 @@ fn validate_sighting_fields(
     pod_size: u32,
 ) {
     assert!(
-        ctx.db.whale_species().id().find(species_id).is_some(),
+        ctx.db.species().id().find(species_id).is_some(),
         "unknown species id {species_id}"
     );
     assert!(
@@ -64,7 +65,25 @@ fn unix_seconds(ctx: &ReducerContext) -> u64 {
 }
 
 #[spacetimedb::reducer(init)]
-pub fn init(_ctx: &ReducerContext) {}
+pub fn init(ctx: &ReducerContext) {
+    // Launch catalogue: whales as the first category. Wildlife-general:
+    // new categories later are data changes, not code changes.
+    let species = [
+        (1, "Humpback Whale", "Megaptera novaeangliae", "whale"),
+        (2, "Southern Right Whale", "Eubalaena australis", "whale"),
+        (3, "Killer Whale", "Orcinus orca", "whale"),
+        (4, "Minke Whale", "Balaenoptera acutorostrata", "whale"),
+        (5, "Bryde's Whale", "Balaenoptera edeni", "whale"),
+    ];
+    for (id, name, scientific_name, category) in species {
+        ctx.db.species().insert(Species {
+            id,
+            name: name.to_string(),
+            scientific_name: scientific_name.to_string(),
+            category: category.to_string(),
+        });
+    }
+}
 
 /// Register (or rename) the caller. Re-registering with the same username
 /// is an idempotent no-op so clients can safely retry.

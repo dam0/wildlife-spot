@@ -1,10 +1,10 @@
 // Real SpacetimeDB WebSocket client — replaces the old HTTP+SQL workaround.
 // Built on generated bindings in ./module_bindings (SpacetimeDB 2.8).
 import { DbConnection } from './module_bindings'
-import type { Sighting, User } from './module_bindings/types'
+import type { Sighting, Species, User } from './module_bindings/types'
 
 export type { DbConnection } from './module_bindings'
-export type { Sighting, User } from './module_bindings/types'
+export type { Sighting, Species, User } from './module_bindings/types'
 
 const HOST = import.meta.env.VITE_SPACETIME_HOST ?? 'https://maincloud.spacetimedb.com'
 const DATABASE = import.meta.env.VITE_SPACETIME_DATABASE ?? 'whale-spotting'
@@ -46,13 +46,19 @@ export interface SpacetimeSession {
   disconnect: () => void
   /** Live snapshot of registered spotters, keyed by identity hex. */
   users: () => UserView[]
+  /** Live species catalogue snapshot (id-ordered). */
+  species: () => SpeciesView[]
 }
+
+/** Client-side view of a catalogue row. */
+export type SpeciesView = Species
 
 export interface ConnectHandlers {
   onConnectError: (message: string) => void
   onDisconnected: (message?: string) => void
   onSightings: (rows: SightingView[]) => void
   onUsers: (rows: UserView[]) => void
+  onSpecies: (rows: SpeciesView[]) => void
 }
 
 function identityHex(value: unknown): string {
@@ -82,9 +88,11 @@ export function connectToSpacetimeDB(
   return new Promise<SpacetimeSession>((resolve, reject) => {
     const sightings = new Map<number, SightingView>()
     const users = new Map<string, UserView>()
+    const species = new Map<number, SpeciesView>()
 
     const emitSightings = () => handlers.onSightings([...sightings.values()])
     const emitUsers = () => handlers.onUsers([...users.values()])
+    const emitSpecies = () => handlers.onSpecies([...species.values()].sort((a, b) => a.id - b.id))
 
     const builder = DbConnection.builder()
       .withUri(HOST)
@@ -120,6 +128,19 @@ export function connectToSpacetimeDB(
           emitUsers()
         })
 
+        conn.db.species.onInsert((_, row) => {
+          species.set(row.id, row)
+          emitSpecies()
+        })
+        conn.db.species.onUpdate((_, _old, newRow) => {
+          species.set(newRow.id, newRow)
+          emitSpecies()
+        })
+        conn.db.species.onDelete((_, row) => {
+          species.delete(row.id)
+          emitSpecies()
+        })
+
         conn.subscriptionBuilder()
           .onApplied(() => {
             settled = true
@@ -128,6 +149,8 @@ export function connectToSpacetimeDB(
               identity: identityHex(identity),
               username,
               users: () => [...users.values()],
+              species: () =>
+                [...species.values()].sort((a, b) => a.id - b.id),
               disconnect: () => {
                 disconnectedIntentionally = true
                 clearStoredToken()
@@ -140,7 +163,7 @@ export function connectToSpacetimeDB(
             if (!settled) reject(new Error(message))
             else handlers.onDisconnected(message)
           })
-          .subscribe(['SELECT * FROM sighting', 'SELECT * FROM user'])
+          .subscribe(['SELECT * FROM sighting', 'SELECT * FROM user', 'SELECT * FROM species'])
       })
       .onConnectError(() => {
         const message = `Could not reach SpacetimeDB at ${HOST}. Check your connection and try again.`

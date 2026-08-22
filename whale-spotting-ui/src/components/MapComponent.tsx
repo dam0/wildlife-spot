@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './MapComponent.css'
-import type { MapClient, SightingRow } from '../spacetime'
+import type { MapClient, SightingRow, SpeciesView } from '../spacetime'
 
 type Sighting = SightingRow
 
@@ -15,22 +15,20 @@ interface UserPin {
   description: string
 }
 
-const SPECIES_NAMES: Record<number, string> = {
-  1: 'Blue Whale',
-  2: 'Humpback Whale',
-  3: 'Gray Whale',
-  4: 'Sperm Whale',
-  5: 'Killer Whale',
-  6: 'Minke Whale',
+/** Category display order — whale first per product decision; others follow alphabetically. */
+const CATEGORY_ORDER = ['whale']
+
+function categoryRank(category: string): number {
+  const i = CATEGORY_ORDER.indexOf(category)
+  return i === -1 ? CATEGORY_ORDER.length : i
 }
 
-const WHALE_EMOJIS: Record<number, string> = {
-  1: '🐋',
-  2: '🐋',
-  3: '🐋',
-  4: '🐋',
-  5: '🐋',
-  6: '🐋',
+/** Category → emoji for markers. Unknown categories fall back to a generic paw. */
+const CATEGORY_EMOJIS: Record<string, string> = {
+  whale: '🐋',
+  dolphin: '🐬',
+  seal: '🦭',
+  seabird: '🐦',
 }
 
 function checkIfWaterByTile(lat: number, lng: number, zoom: number = 12): Promise<boolean> {
@@ -127,7 +125,27 @@ function checkIfWaterByTile(lat: number, lng: number, zoom: number = 12): Promis
   })
 }
 
-export default function MapComponent({ client, username, sightings }: { client: MapClient; username: string; sightings: Sighting[] }) {
+export default function MapComponent({ client, username, sightings, species }: { client: MapClient; username: string; sightings: Sighting[]; species: SpeciesView[] }) {
+  // Catalogue helpers — everything derives from the live DB table now.
+  const speciesById = useMemo(
+    () => new Map(species.map((s) => [s.id, s])),
+    [species],
+  )
+  const speciesName = (id: number) => speciesById.get(id)?.name ?? 'Unknown Species'
+  const categoryOf = (id: number) => speciesById.get(id)?.category ?? ''
+  const emojiFor = (id: number) => CATEGORY_EMOJIS[categoryOf(id)] ?? '🐾'
+  /** Grouped options: category rank first, then catalogue id order. */
+  const groupedSpecies = useMemo(() => {
+    const groups = new Map<string, SpeciesView[]>()
+    for (const s of species) {
+      const list = groups.get(s.category) ?? []
+      list.push(s)
+      groups.set(s.category, list)
+    }
+    return [...groups.entries()].sort((a, b) => categoryRank(a[0]) - categoryRank(b[0]))
+  }, [species])
+  const defaultSpeciesId = species[0]?.id ?? 1
+
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<Map<number, L.Marker>>(new Map())
   const userPinMarkersRef = useRef<Map<string, L.Marker>>(new Map())
@@ -190,7 +208,7 @@ export default function MapComponent({ client, username, sightings }: { client: 
         id: `pin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         lat,
         lng,
-        species_id: 2,
+        species_id: defaultSpeciesId,
         pod_size: 2,
         description: '',
       }
@@ -204,7 +222,7 @@ export default function MapComponent({ client, username, sightings }: { client: 
     return () => {
       mapRef.current?.off('click', handleMapClick)
     }
-  }, [userPins.length])
+  }, [userPins.length, defaultSpeciesId])
 
   useEffect(() => {
     if (!mapRef.current) return
@@ -226,10 +244,9 @@ export default function MapComponent({ client, username, sightings }: { client: 
       const existingMarker = userPinMarkersRef.current.get(pin.id)
       
       if (existingMarker) {
-        const whaleEmoji = WHALE_EMOJIS[pin.species_id]
         const customIcon = L.divIcon({
           html: `<div class="user-marker" style="font-size: 32px; display: flex; align-items: center; gap: 4px;">
-            ${whaleEmoji}
+            ${emojiFor(pin.species_id)}
             <span style="font-weight: bold; color: #4CAF50; background: white; padding: 2px 6px; border-radius: 12px; font-size: 14px;">${pin.pod_size}</span>
           </div>`,
           iconSize: [60, 40],
@@ -241,10 +258,10 @@ export default function MapComponent({ client, username, sightings }: { client: 
 
       if (!userPinMarkersRef.current.has(pin.id)) {
         const createMarker = () => {
-          const whaleEmoji = WHALE_EMOJIS[pin.species_id]
+          const emoji = emojiFor(pin.species_id)
           const customIcon = L.divIcon({
             html: `<div class="user-marker" style="font-size: 32px; display: flex; align-items: center; gap: 4px;">
-              ${whaleEmoji}
+              ${emoji}
               <span style="font-weight: bold; color: #4CAF50; background: white; padding: 2px 6px; border-radius: 12px; font-size: 14px;">${pin.pod_size}</span>
             </div>`,
             iconSize: [60, 40],
@@ -258,20 +275,24 @@ export default function MapComponent({ client, username, sightings }: { client: 
           draggable: true,
         }).addTo(mapRef.current!)
 
+        const optionsHTML = groupedSpecies
+          .map(
+            ([category, list]) =>
+              `<optgroup label="${category}">` +
+              list.map((s) => `<option value="${s.id}">${s.name}</option>`).join('') +
+              `</optgroup>`,
+          )
+          .join('')
+
         const formHTML = `
           <div class="user-location-form">
-            <h3>🐋 ${username}</h3>
+            <h3>${emojiFor(pin.species_id)} ${username}</h3>
             <p style="font-size: 0.75rem; color: #999; margin-bottom: 0.5rem;">Lat: ${pin.lat.toFixed(4)} | Lng: ${pin.lng.toFixed(4)}</p>
             <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Drag the pin to update coordinates</p>
             <div class="form-group">
               <label>Species:</label>
               <select id="species-select-${pin.id}" class="species-select">
-                <option value="2">Humpback Whale</option>
-                <option value="1">Blue Whale</option>
-                <option value="3">Gray Whale</option>
-                <option value="4">Sperm Whale</option>
-                <option value="5">Killer Whale</option>
-                <option value="6">Minke Whale</option>
+                ${optionsHTML}
               </select>
             </div>
             <div class="form-group">
@@ -352,7 +373,7 @@ export default function MapComponent({ client, username, sightings }: { client: 
                   const markerPos = marker.getLatLng()
                   const selectedSpecies = parseInt((speciesSelect?.value || String(currentPin.species_id)).toString())
                   const selectedPodSize = parseInt((podSizeInput?.value || String(currentPin.pod_size)).toString())
-                  const selectedDesc = descriptionInput?.value || currentPin.description || `${SPECIES_NAMES[selectedSpecies]} pod of ${selectedPodSize} whales`
+                  const selectedDesc = descriptionInput?.value || currentPin.description || `${speciesName(selectedSpecies)} pod of ${selectedPodSize}`
                  
                  console.log('[Report] Sending sighting with args:', [
                    selectedSpecies,
@@ -411,7 +432,7 @@ export default function MapComponent({ client, username, sightings }: { client: 
          userPinMarkersRef.current.set(pin.id, marker)
        }
      })
-   }, [userPins])
+   }, [userPins, groupedSpecies])
 
   // Live updates arrive via SpacetimeDB subscriptions; no polling needed.
 
@@ -432,23 +453,32 @@ export default function MapComponent({ client, username, sightings }: { client: 
     })
 
      sightings.forEach((sighting) => {
-        const speciesName = SPECIES_NAMES[sighting.species_id] || 'Unknown Species'
-        const whaleEmoji = WHALE_EMOJIS[sighting.species_id] || '🐋'
+        const name = speciesName(sighting.species_id)
+        const emoji = emojiFor(sighting.species_id)
         const isOwner = sighting.username === username
 
         if (!markersRef.current.has(sighting.id)) {
-         
+
          const customIcon = L.divIcon({
            html: `<div style="font-size: 32px; display: flex; align-items: center; justify-content: center;">
-             ${whaleEmoji}
+             ${emoji}
            </div>`,
            iconSize: [40, 40],
            className: 'sighting-marker',
          })
 
+          const optionsHTML = groupedSpecies
+            .map(
+              ([category, list]) =>
+                `<optgroup label="${category}">` +
+                list.map((s) => `<option value="${s.id}">${s.name}</option>`).join('') +
+                `</optgroup>`,
+            )
+            .join('')
+
           const popupHTML = `
             <div class="popup">
-              <h4 id="sighting-species-${sighting.id}">${speciesName}</h4>
+              <h4 id="sighting-species-${sighting.id}">${name}</h4>
               <p><strong>By:</strong> ${sighting.username}</p>
               <p id="sighting-location-${sighting.id}" style="font-size: 0.75rem; color: #999;">
                 <strong>Location:</strong> ${sighting.latitude.toFixed(4)}, ${sighting.longitude.toFixed(4)}
@@ -458,12 +488,7 @@ export default function MapComponent({ client, username, sightings }: { client: 
                 <div class="form-group">
                   <label>Species:</label>
                   <select id="edit-species-${sighting.id}" class="species-select">
-                    <option value="1">Blue Whale</option>
-                    <option value="2">Humpback Whale</option>
-                    <option value="3">Gray Whale</option>
-                    <option value="4">Sperm Whale</option>
-                    <option value="5">Killer Whale</option>
-                    <option value="6">Minke Whale</option>
+                    ${optionsHTML}
                   </select>
                 </div>
                     <div class="form-group">
@@ -668,56 +693,60 @@ export default function MapComponent({ client, username, sightings }: { client: 
         } else {
            const existingMarker = markersRef.current.get(sighting.id)
            if (existingMarker) {
-             const speciesName = SPECIES_NAMES[sighting.species_id] || 'Unknown Species'
-             const whaleEmoji = WHALE_EMOJIS[sighting.species_id] || '🐋'
-             
-             const prevPos = existingMarker.getLatLng()
-             if (prevPos.lat !== sighting.latitude || prevPos.lng !== sighting.longitude) {
-               existingMarker.setLatLng([sighting.latitude, sighting.longitude])
-             }
-             
-             const newIcon = L.divIcon({
-               html: `<div style="font-size: 32px; display: flex; align-items: center; justify-content: center;">
-                 ${whaleEmoji}
-               </div>`,
-               iconSize: [40, 40],
-               className: 'sighting-marker',
-             })
-             existingMarker.setIcon(newIcon)
-             
-             const popupHTML = `
-               <div class="popup">
-                 <h4 id="sighting-species-${sighting.id}">${speciesName}</h4>
-                 <p><strong>By:</strong> ${sighting.username}</p>
-                 <p id="sighting-location-${sighting.id}" style="font-size: 0.75rem; color: #999;">
-                   <strong>Location:</strong> ${sighting.latitude.toFixed(4)}, ${sighting.longitude.toFixed(4)}
-                 </p>
-                 <p id="sighting-time-${sighting.id}"><strong>Time:</strong> ${new Date(sighting.timestamp).toLocaleString()}</p>
-                 ${isOwner ? `
-                   <div class="form-group">
-                     <label>Species:</label>
-                     <select id="edit-species-${sighting.id}" class="species-select">
-                       <option value="1">Blue Whale</option>
-                       <option value="2">Humpback Whale</option>
-                       <option value="3">Gray Whale</option>
-                       <option value="4">Sperm Whale</option>
-                       <option value="5">Killer Whale</option>
-                       <option value="6">Minke Whale</option>
-                     </select>
-                   </div>
-                   <div class="form-group">
-                     <label>Pod Size:</label>
-                     <input type="number" id="edit-pod-size-${sighting.id}" class="pod-size-input" value="${sighting.pod_size || 1}" min="1" max="50" />
-                   </div>
-                   <div class="form-group">
-                     <label>Description:</label>
-                     <textarea id="edit-description-${sighting.id}" class="description-input" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem; resize: vertical;" rows="2"></textarea>
-                   </div>
-                   <p style="font-size: 0.85rem; color: #666; margin: 0.5rem 0;">Drag the marker to update location</p>
-                   <button id="save-edit-${sighting.id}" class="report-btn" style="width: 100%; padding: 8px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 8px;">
-                     Save Changes
-                   </button>
-                 ` : `
+            const name = speciesName(sighting.species_id)
+            const emoji = emojiFor(sighting.species_id)
+
+            const prevPos = existingMarker.getLatLng()
+            if (prevPos.lat !== sighting.latitude || prevPos.lng !== sighting.longitude) {
+              existingMarker.setLatLng([sighting.latitude, sighting.longitude])
+            }
+
+            const newIcon = L.divIcon({
+              html: `<div style="font-size: 32px; display: flex; align-items: center; justify-content: center;">
+                ${emoji}
+              </div>`,
+              iconSize: [40, 40],
+              className: 'sighting-marker',
+            })
+            existingMarker.setIcon(newIcon)
+
+            const optionsHTML = groupedSpecies
+              .map(
+                ([category, list]) =>
+                  `<optgroup label="${category}">` +
+                  list.map((s) => `<option value="${s.id}">${s.name}</option>`).join('') +
+                  `</optgroup>`,
+              )
+              .join('')
+
+            const popupHTML = `
+              <div class="popup">
+                <h4 id="sighting-species-${sighting.id}">${name}</h4>
+                <p><strong>By:</strong> ${sighting.username}</p>
+                <p id="sighting-location-${sighting.id}" style="font-size: 0.75rem; color: #999;">
+                  <strong>Location:</strong> ${sighting.latitude.toFixed(4)}, ${sighting.longitude.toFixed(4)}
+                </p>
+                <p id="sighting-time-${sighting.id}"><strong>Time:</strong> ${new Date(sighting.timestamp).toLocaleString()}</p>
+                ${isOwner ? `
+                  <div class="form-group">
+                    <label>Species:</label>
+                    <select id="edit-species-${sighting.id}" class="species-select">
+                      ${optionsHTML}
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Pod Size:</label>
+                    <input type="number" id="edit-pod-size-${sighting.id}" class="pod-size-input" value="${sighting.pod_size || 1}" min="1" max="50" />
+                  </div>
+                  <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="edit-description-${sighting.id}" class="description-input" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem; resize: vertical;" rows="2"></textarea>
+                  </div>
+                  <p style="font-size: 0.85rem; color: #666; margin: 0.5rem 0;">Drag the marker to update location</p>
+                  <button id="save-edit-${sighting.id}" class="report-btn" style="width: 100%; padding: 8px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 8px;">
+                    Save Changes
+                  </button>
+                ` : `
                    <p><strong>Pod Size:</strong> ${sighting.pod_size || 1}</p>
                    <p><strong>Details:</strong> ${sighting.description}</p>
                  `}
@@ -871,7 +900,7 @@ export default function MapComponent({ client, username, sightings }: { client: 
            }
          }
       })
-   }, [sightings, username, client])
+   }, [sightings, username, client, species])
 
   // Sidebar row → map: fly to the pin and open its (editable) details popup.
   const focusSighting = (id: number) => {
@@ -909,7 +938,7 @@ export default function MapComponent({ client, username, sightings }: { client: 
                 title="Show on map"
                 style={{ cursor: 'pointer' }}
               >
-                <h4>{SPECIES_NAMES[sighting.species_id] || 'Unknown'}</h4>
+                <h4>{speciesName(sighting.species_id)}</h4>
                 <p className="sighting-user">by {sighting.username}</p>
                 <p className="sighting-time">
                   {new Date(sighting.timestamp).toLocaleDateString()}

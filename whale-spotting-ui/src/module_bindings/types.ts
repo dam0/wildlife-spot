@@ -22,16 +22,17 @@ export const Sighting = __t.object("Sighting", {
 });
 export type Sighting = __Infer<typeof Sighting>;
 
+export const Species = __t.object("Species", {
+  id: __t.u32(),
+  name: __t.string(),
+  scientificName: __t.string(),
+  category: __t.string(),
+});
+export type Species = __Infer<typeof Species>;
+
 export const User = __t.object("User", {
   identity: __t.identity(),
   username: __t.string(),
 });
 export type User = __Infer<typeof User>;
-
-export const WhaleSpecies = __t.object("WhaleSpecies", {
-  id: __t.u32(),
-  name: __t.string(),
-  scientificName: __t.string(),
-});
-export type WhaleSpecies = __Infer<typeof WhaleSpecies>;
 

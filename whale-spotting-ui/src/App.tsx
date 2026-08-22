@@ -11,6 +11,7 @@ import {
   type SpacetimeSession,
   type SightingView,
   type SightingRow,
+  type SpeciesView,
   type UserView,
   type MapClient,
 } from './spacetime'
@@ -22,6 +23,7 @@ function App() {
   const [username, setUsername] = useState('')
   const [sightings, setSightings] = useState<SightingView[]>([])
   const [users, setUsers] = useState<UserView[]>([])
+  const [species, setSpecies] = useState<SpeciesView[]>([])
   const [banner, setBanner] = useState('')
   const [loginError, setLoginError] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -42,6 +44,7 @@ function App() {
           },
           onSightings: (rows) => setSightings(rows),
           onUsers: (rows) => setUsers(rows),
+          onSpecies: (rows) => setSpecies(rows),
         })
 
         // Deterministic ownership check: the subscription cache holds every
@@ -102,6 +105,7 @@ function App() {
     setUsername('')
     setSightings([])
     setUsers([])
+    setSpecies([])
     setBanner('')
   }
 
@@ -146,6 +150,7 @@ function App() {
               client={mapClient}
               username={username}
               sightings={rowsForMap}
+              species={species}
             />
             <button onClick={handleLogout} className="logout-btn">
               Logout

@@ -14,4 +14,5 @@ export default __t.row({
   id: __t.u32().primaryKey(),
   name: __t.string(),
   scientificName: __t.string().name("scientific_name"),
+  category: __t.string(),
 });
