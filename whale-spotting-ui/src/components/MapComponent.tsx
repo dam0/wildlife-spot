@@ -13,6 +13,8 @@ interface UserPin {
   species_id: number
   pod_size: number
   description: string
+  /** True until the user explicitly picks a species (vs. the seeded assumption). */
+  speciesAssumed: boolean
 }
 
 /** Category display order — whale first per product decision; others follow alphabetically. */
@@ -144,7 +146,10 @@ export default function MapComponent({ client, username, sightings, species }: {
     }
     return [...groups.entries()].sort((a, b) => categoryRank(a[0]) - categoryRank(b[0]))
   }, [species])
-  const defaultSpeciesId = species[0]?.id ?? 1
+  const defaultSpeciesId = useMemo(() => {
+    const humpback = species.find((s) => /humpback/i.test(s.name))
+    return humpback?.id ?? species[0]?.id ?? 1
+  }, [species])
 
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<Map<number, L.Marker>>(new Map())
@@ -211,6 +216,7 @@ export default function MapComponent({ client, username, sightings, species }: {
         species_id: defaultSpeciesId,
         pod_size: 2,
         description: '',
+        speciesAssumed: true,
       }
 
       setUserPins((prev) => [...prev, newPin])
@@ -253,6 +259,14 @@ export default function MapComponent({ client, username, sightings, species }: {
           className: 'custom-user-marker',
         })
         existingMarker.setIcon(customIcon)
+
+        // Keep the open popup's Assumed badge in sync when the flag changes
+        // (e.g. the user just picked a species explicitly).
+        const badge = document.getElementById(`assumed-badge-${pin.id}`)
+        if (badge) {
+          if (pin.speciesAssumed) badge.style.display = ''
+          else badge.remove()
+        }
         return
       }
 
@@ -284,9 +298,13 @@ export default function MapComponent({ client, username, sightings, species }: {
           )
           .join('')
 
+        const assumedBadge = pin.speciesAssumed
+          ? `<span id="assumed-badge-${pin.id}" title="Pre-filled because Humpbacks are the most common sighting — pick a species if you identified one" style="font-size: 0.7rem; background: #FFF3CD; color: #856404; padding: 2px 6px; border-radius: 10px; margin-left: 6px;">Assumed</span>`
+          : ''
+
         const formHTML = `
           <div class="user-location-form">
-            <h3>${emojiFor(pin.species_id)} ${username}</h3>
+            <h3>${emojiFor(pin.species_id)} ${username}${assumedBadge}</h3>
             <p style="font-size: 0.75rem; color: #999; margin-bottom: 0.5rem;">Lat: ${pin.lat.toFixed(4)} | Lng: ${pin.lng.toFixed(4)}</p>
             <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Drag the pin to update coordinates</p>
             <div class="form-group">
@@ -330,8 +348,11 @@ export default function MapComponent({ client, username, sightings, species }: {
               speciesSelect.value = String(currentPin.species_id)
               const handleSpeciesChange = (e: Event) => {
                 const newSpecies = parseInt((e.target as HTMLSelectElement).value)
+                // An explicit pick always wins over the seeded assumption.
                 setUserPins((prev) =>
-                  prev.map((p) => (p.id === pin.id ? { ...p, species_id: newSpecies } : p))
+                  prev.map((p) =>
+                    p.id === pin.id ? { ...p, species_id: newSpecies, speciesAssumed: false } : p,
+                  ),
                 )
               }
               speciesSelect.removeEventListener('change', handleSpeciesChange as EventListener)
