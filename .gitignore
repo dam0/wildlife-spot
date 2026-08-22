@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+
+# Build artifacts / caches (never commit)
+.tools/
+.npm-cache/
+whale-spotting-ui/.npm-cache/
+whale-spotting/.cargo-home/
+whale-spotting/target/
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
