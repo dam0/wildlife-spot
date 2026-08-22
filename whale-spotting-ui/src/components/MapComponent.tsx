@@ -143,6 +143,11 @@ export default function MapComponent({ client, username, sightings }: { client: 
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19,
       }).addTo(mapRef.current)
+
+      // Dev/test hook: lets Playwright drive the map deterministically.
+      if (import.meta.env.DEV) {
+        ;(window as unknown as Record<string, unknown>).__leafletMap = mapRef.current
+      }
     }
 
     navigator.geolocation.getCurrentPosition(
