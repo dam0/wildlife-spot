@@ -9,13 +9,51 @@ export type { Sighting, Species, User } from './module_bindings/types'
 const HOST = import.meta.env.VITE_SPACETIME_HOST ?? 'https://maincloud.spacetimedb.com'
 const DATABASE = import.meta.env.VITE_SPACETIME_DATABASE ?? 'whale-spotting'
 const TOKEN_KEY = 'whalespot.token'
+const DEVICE_USER_COOKIE = 'whalespot.device_user'
+const TOKEN_COOKIE = 'whalespot.token'
+
+function writeCookie(name: string, value: string): void {
+  document.cookie = `${name}=${encodeURIComponent(value)}; max-age=31536000; path=/; SameSite=Lax`
+}
+
+function readCookie(name: string): string | undefined {
+  const match = document.cookie.match(new RegExp(`(?:^;|\\s*)${name}=([^;]*)`))
+  return match ? decodeURIComponent(match[1]) : undefined
+}
+
+function eraseCookie(name: string): void {
+  document.cookie = `${name}=; max-age=0; path=/`
+}
+
+/** Remember which username this device last used (1-year cookie). */
+export function setDeviceUser(username: string): void {
+  writeCookie(DEVICE_USER_COOKIE, username)
+}
+
+export function getDeviceUser(): string | undefined {
+  return readCookie(DEVICE_USER_COOKIE)
+}
+
+export function clearDeviceUser(): void {
+  eraseCookie(DEVICE_USER_COOKIE)
+}
+
+/**
+ * Token persists in localStorage AND a device cookie: if one store is cleared
+ * (e.g. site data wipe) the other restores the same identity on this device.
+ */
+export function setStoredToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token)
+  writeCookie(TOKEN_COOKIE, token)
+}
 
 export function getStoredToken(): string | undefined {
-  return localStorage.getItem(TOKEN_KEY) ?? undefined
+  return localStorage.getItem(TOKEN_KEY) ?? readCookie(TOKEN_COOKIE)
 }
 
 export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+  eraseCookie(TOKEN_COOKIE)
 }
 
 /** Client-side view of a sighting row (ids/identities flattened to primitives). */
@@ -105,6 +143,7 @@ export function connectToSpacetimeDB(
       .onConnect((conn, identity, returnedToken) => {
         // Persist the credential so refreshes/reconnects keep the same identity.
         localStorage.setItem(TOKEN_KEY, returnedToken)
+        writeCookie(TOKEN_COOKIE, returnedToken)
 
         conn.db.sighting.onInsert((_, row) => {
           sightings.set(Number(row.id), toView(row))

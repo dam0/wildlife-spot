@@ -190,6 +190,10 @@ export default function MapComponent({ client, username, sightings, species }: {
         mapRef.current.remove()
         mapRef.current = null
       }
+      // StrictMode remounts the map in dev; stale marker objects bound to the
+      // removed instance would block re-creation on the new one.
+      markersRef.current.clear()
+      userPinMarkersRef.current.clear()
     }
   }, [])
 
@@ -457,9 +461,37 @@ export default function MapComponent({ client, username, sightings, species }: {
 
   // Live updates arrive via SpacetimeDB subscriptions; no polling needed.
 
+  // Frame the user's pins once they arrive: geolocation may be denied or the
+  // pins may be far from the default world view, so bring them into view.
+  // fitBounds can silently no-op if the container hadn't laid out yet, so
+  // retry a few times until the viewport actually moves.
+  const fittedRef = useRef(false)
+  useEffect(() => {
+    if (fittedRef.current || sightings.length === 0) return
+    const map = mapRef.current
+    if (!map) return
+    const bounds = L.latLngBounds(
+      sightings.map((s) => [s.latitude, s.longitude] as [number, number]),
+    )
+    let tries = 0
+    const tryFit = () => {
+      if (fittedRef.current) return
+      tries++
+      map.invalidateSize()
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 })
+      const c = map.getCenter()
+      const moved = !(Math.abs(c.lat - 20) < 0.5 && Math.abs(c.lng) < 0.5)
+      if (moved) {
+        fittedRef.current = true
+      } else if (tries < 10) {
+        setTimeout(tryFit, 400)
+      }
+    }
+    tryFit()
+  }, [sightings])
+
   useEffect(() => {
     if (!mapRef.current) return
-
     const currentMarkers = new Set(markersRef.current.keys())
     const newSightingIds = new Set(sightings.map((s) => s.id))
 
@@ -477,6 +509,12 @@ export default function MapComponent({ client, username, sightings, species }: {
         const name = speciesName(sighting.species_id)
         const emoji = emojiFor(sighting.species_id)
         const isOwner = sighting.username === username
+        // After a StrictMode remount the ref may still hold markers from the
+        // destroyed map instance; recreate them on the live map instead.
+        const stale = markersRef.current.get(sighting.id)
+        if (stale && (!mapRef.current || !mapRef.current.hasLayer(stale))) {
+          markersRef.current.delete(sighting.id)
+        }
 
         if (!markersRef.current.has(sighting.id)) {
 

@@ -5,9 +5,11 @@ import LoginForm from './components/LoginForm'
 import {
   clearStoredToken,
   connectToSpacetimeDB,
+  getDeviceUser,
   getStoredToken,
   makeMapClient,
   registerUser,
+  setDeviceUser,
   type SpacetimeSession,
   type SightingView,
   type SightingRow,
@@ -68,6 +70,7 @@ function App() {
         }
 
         localStorage.setItem(USERNAME_KEY, name)
+        setDeviceUser(name)
         setBanner('')
         setSession(s)
         setUsername(name)
@@ -101,6 +104,7 @@ function App() {
     session?.disconnect()
     clearStoredToken()
     localStorage.removeItem(USERNAME_KEY)
+    // Keep the device cookie: it's what enables "Continue as dam1?" next visit.
     setSession(null)
     setUsername('')
     setSightings([])
@@ -142,7 +146,12 @@ function App() {
       {restoring ? (
         <p style={{ padding: '1rem' }}>Reconnecting…</p>
       ) : !session ? (
-        <LoginForm onSubmit={handleLoginSubmit} loading={connecting} error={loginError} />
+        <LoginForm
+          onSubmit={handleLoginSubmit}
+          loading={connecting}
+          error={loginError}
+          deviceUser={getDeviceUser()}
+        />
       ) : (
         mapClient && (
           <div className="main-content">
