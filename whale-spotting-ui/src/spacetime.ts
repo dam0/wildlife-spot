@@ -17,7 +17,7 @@ function writeCookie(name: string, value: string): void {
 }
 
 function readCookie(name: string): string | undefined {
-  const match = document.cookie.match(new RegExp(`(?:^;|\\s*)${name}=([^;]*)`))
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))
   return match ? decodeURIComponent(match[1]) : undefined
 }
 
@@ -192,7 +192,6 @@ export function connectToSpacetimeDB(
                 [...species.values()].sort((a, b) => a.id - b.id),
               disconnect: () => {
                 disconnectedIntentionally = true
-                clearStoredToken()
                 conn.disconnect()
               },
             })

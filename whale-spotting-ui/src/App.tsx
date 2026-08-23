@@ -60,7 +60,9 @@ function App() {
           await registerUser(s.connection, name)
         } catch (err) {
           s.disconnect()
-          clearStoredToken()
+          if (!takenByOther) {
+            clearStoredToken()
+          }
           setLoginError(
             takenByOther || /already taken/i.test(String(err))
               ? 'That username is already taken — please pick another.'
@@ -102,9 +104,9 @@ function App() {
 
   const handleLogout = () => {
     session?.disconnect()
-    clearStoredToken()
+    // Do NOT clear stored tokens on logout: on a single-device app, logging
+    // out and back in as the same user must preserve the device's identity token.
     localStorage.removeItem(USERNAME_KEY)
-    // Keep the device cookie: it's what enables "Continue as dam1?" next visit.
     setSession(null)
     setUsername('')
     setSightings([])
