@@ -151,6 +151,23 @@ export default function MapComponent({ client, username, sightings, species }: {
     return humpback?.id ?? species[0]?.id ?? 1
   }, [species])
 
+  const renderSpeciesOptions = (selectedId: number, isAssumed: boolean) => {
+    return groupedSpecies
+      .map(
+        ([category, list]) =>
+          `<optgroup label="${category}">` +
+          list
+            .map((s) => {
+              const mark = isAssumed && s.id === defaultSpeciesId ? ' (?)' : ''
+              const selected = s.id === selectedId ? ' selected' : ''
+              return `<option value="${s.id}"${selected}>${s.name}${mark}</option>`
+            })
+            .join('') +
+          `</optgroup>`,
+      )
+      .join('')
+  }
+
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<Map<number, L.Marker>>(new Map())
   const userPinMarkersRef = useRef<Map<string, L.Marker>>(new Map())
@@ -263,14 +280,6 @@ export default function MapComponent({ client, username, sightings, species }: {
           className: 'custom-user-marker',
         })
         existingMarker.setIcon(customIcon)
-
-        // Keep the open popup's Assumed badge in sync when the flag changes
-        // (e.g. the user just picked a species explicitly).
-        const badge = document.getElementById(`assumed-badge-${pin.id}`)
-        if (badge) {
-          if (pin.speciesAssumed) badge.style.display = ''
-          else badge.remove()
-        }
         return
       }
 
@@ -293,22 +302,11 @@ export default function MapComponent({ client, username, sightings, species }: {
           draggable: true,
         }).addTo(mapRef.current!)
 
-        const optionsHTML = groupedSpecies
-          .map(
-            ([category, list]) =>
-              `<optgroup label="${category}">` +
-              list.map((s) => `<option value="${s.id}">${s.name}</option>`).join('') +
-              `</optgroup>`,
-          )
-          .join('')
-
-        const assumedBadge = pin.speciesAssumed
-          ? `<span id="assumed-badge-${pin.id}" title="Pre-filled because Humpbacks are the most common sighting — pick a species if you identified one" style="font-size: 0.7rem; background: #FFF3CD; color: #856404; padding: 2px 6px; border-radius: 10px; margin-left: 6px;">Assumed</span>`
-          : ''
+        const optionsHTML = renderSpeciesOptions(pin.species_id, pin.speciesAssumed)
 
         const formHTML = `
           <div class="user-location-form">
-            <h3>${emojiFor(pin.species_id)} ${username}${assumedBadge}</h3>
+            <h3>${emojiFor(pin.species_id)} ${username}</h3>
             <p style="font-size: 0.75rem; color: #999; margin-bottom: 0.5rem;">Lat: ${pin.lat.toFixed(4)} | Lng: ${pin.lng.toFixed(4)}</p>
             <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Drag the pin to update coordinates</p>
             <div class="form-group">
@@ -349,6 +347,7 @@ export default function MapComponent({ client, username, sightings, species }: {
             if (!currentPin) return
 
             if (speciesSelect) {
+              speciesSelect.innerHTML = renderSpeciesOptions(currentPin.species_id, currentPin.speciesAssumed)
               speciesSelect.value = String(currentPin.species_id)
               const handleSpeciesChange = (e: Event) => {
                 const newSpecies = parseInt((e.target as HTMLSelectElement).value)
@@ -358,6 +357,9 @@ export default function MapComponent({ client, username, sightings, species }: {
                     p.id === pin.id ? { ...p, species_id: newSpecies, speciesAssumed: false } : p,
                   ),
                 )
+                // Remove the question mark prompt once user has chosen.
+                speciesSelect.innerHTML = renderSpeciesOptions(newSpecies, false)
+                speciesSelect.value = String(newSpecies)
               }
               speciesSelect.removeEventListener('change', handleSpeciesChange as EventListener)
               speciesSelect.addEventListener('change', handleSpeciesChange)
@@ -526,14 +528,7 @@ export default function MapComponent({ client, username, sightings, species }: {
            className: 'sighting-marker',
          })
 
-          const optionsHTML = groupedSpecies
-            .map(
-              ([category, list]) =>
-                `<optgroup label="${category}">` +
-                list.map((s) => `<option value="${s.id}">${s.name}</option>`).join('') +
-                `</optgroup>`,
-            )
-            .join('')
+          const optionsHTML = renderSpeciesOptions(sighting.species_id, false)
 
           const popupHTML = `
             <div class="popup">
@@ -769,14 +764,7 @@ export default function MapComponent({ client, username, sightings, species }: {
             })
             existingMarker.setIcon(newIcon)
 
-            const optionsHTML = groupedSpecies
-              .map(
-                ([category, list]) =>
-                  `<optgroup label="${category}">` +
-                  list.map((s) => `<option value="${s.id}">${s.name}</option>`).join('') +
-                  `</optgroup>`,
-              )
-              .join('')
+            const optionsHTML = renderSpeciesOptions(sighting.species_id, false)
 
             const popupHTML = `
               <div class="popup">
