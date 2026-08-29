@@ -3,6 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './MapComponent.css'
 import type { MapClient, SightingRow, SpeciesView } from '../spacetime'
+import { isWater } from '../waterCheck'
 
 type Sighting = SightingRow
 
@@ -31,100 +32,6 @@ const CATEGORY_EMOJIS: Record<string, string> = {
   dolphin: '🐬',
   seal: '🦭',
   seabird: '🐦',
-}
-
-function checkIfWaterByTile(lat: number, lng: number, zoom: number = 12): Promise<boolean> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.crossOrigin = 'Anonymous'
-
-    const x = Math.floor(((lng + 180) / 360) * Math.pow(2, zoom))
-    const y = Math.floor(
-      ((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) *
-        Math.pow(2, zoom)
-    )
-
-    const tileUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`
-    console.log(`[Water Check] Checking tile ${zoom}/${x}/${y} for location (${lat.toFixed(4)}, ${lng.toFixed(4)})`)
-
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas')
-        canvas.width = img.width
-        canvas.height = img.height
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          console.warn('Could not get canvas context')
-          resolve(false)
-          return
-        }
-
-        ctx.drawImage(img, 0, 0)
-        const imageData = ctx.getImageData(0, 0, img.width, img.height)
-        const data = imageData.data
-
-        const centerX = Math.floor(img.width / 2)
-        const centerY = Math.floor(img.height / 2)
-
-        let waterCount = 0
-        let landCount = 0
-        const pixelSamples: {r: number; g: number; b: number}[] = []
-        
-        const sampleRadius = 40
-        const sampleStep = 2
-        
-        for (let i = -sampleRadius; i <= sampleRadius; i += sampleStep) {
-          for (let j = -sampleRadius; j <= sampleRadius; j += sampleStep) {
-            const px = centerX + i
-            const py = centerY + j
-            
-            if (px >= 0 && px < img.width && py >= 0 && py < img.height) {
-              const pixelIndex = (py * img.width + px) * 4
-              const r = data[pixelIndex]
-              const g = data[pixelIndex + 1]
-              const b = data[pixelIndex + 2]
-              
-              pixelSamples.push({r, g, b})
-              
-              if (b > 120 && b > g && b > r) {
-                waterCount++
-              } else {
-                landCount++
-              }
-            }
-          }
-        }
-
-        const totalSamples = waterCount + landCount
-        const waterRatio = totalSamples > 0 ? waterCount / totalSamples : 0
-        const avgRGB = pixelSamples.reduce(
-          (acc, p) => ({
-            r: acc.r + p.r,
-            g: acc.g + p.g,
-            b: acc.b + p.b,
-          }),
-          {r: 0, g: 0, b: 0}
-        )
-        avgRGB.r = Math.round(avgRGB.r / pixelSamples.length)
-        avgRGB.g = Math.round(avgRGB.g / pixelSamples.length)
-        avgRGB.b = Math.round(avgRGB.b / pixelSamples.length)
-
-        const isWater = waterRatio > 0.3
-        console.log(`[Water Analysis] Water: ${waterCount}/${totalSamples} (${(waterRatio * 100).toFixed(0)}%), Avg RGB: (${avgRGB.r}, ${avgRGB.g}, ${avgRGB.b}), Result: ${isWater ? 'WATER ✓' : 'LAND ✗'}`)
-        resolve(isWater)
-      } catch (err) {
-        console.error('Tile analysis error:', err)
-        resolve(false)
-      }
-    }
-
-    img.onerror = () => {
-      console.error('Failed to load tile:', tileUrl)
-      resolve(false)
-    }
-
-    img.src = tileUrl
-  })
 }
 
 export default function MapComponent({ client, username, sightings, species }: { client: MapClient; username: string; sightings: Sighting[]; species: SpeciesView[] }) {
@@ -223,9 +130,9 @@ export default function MapComponent({ client, username, sightings, species }: {
 
       setMessage('Checking if location is water...')
 
-      const isWater = await checkIfWaterByTile(lat, lng, mapRef.current!.getZoom())
+      const waterResult = await isWater(lat, lng)
 
-      if (!isWater) {
+      if (!waterResult) {
         setMessage('This location is on land. Please click on water (ocean).')
         return
       }
@@ -445,7 +352,7 @@ export default function MapComponent({ client, username, sightings, species }: {
 
          marker.on('dragend', async () => {
            const newPos = marker.getLatLng()
-           const waterCheck = await checkIfWaterByTile(newPos.lat, newPos.lng, mapRef.current!.getZoom())
+           const waterCheck = await isWater(newPos.lat, newPos.lng)
            if (waterCheck) {
              setUserPins((prev) =>
                prev.map((p) => (p.id === pin.id ? { ...p, lat: newPos.lat, lng: newPos.lng } : p))
@@ -714,7 +621,7 @@ export default function MapComponent({ client, username, sightings, species }: {
           if (isOwner) {
             marker.on('dragend', async () => {
               const newPos = marker.getLatLng()
-              const waterCheck = await checkIfWaterByTile(newPos.lat, newPos.lng, mapRef.current!.getZoom())
+              const waterCheck = await isWater(newPos.lat, newPos.lng)
               if (waterCheck) {
                 const locationDisplay = document.getElementById(`sighting-location-${sighting.id}`)
                 if (locationDisplay && marker.isPopupOpen()) {
