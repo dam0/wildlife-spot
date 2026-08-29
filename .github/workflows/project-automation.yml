@@ -1,0 +1,60 @@
+name: Project board automation
+
+# Keeps the repo's GitHub Project board in sync with issues.
+# Replaces the two built-in project Workflows so no manual board setup is needed:
+#   - issue opened  -> add to board, set Status: Backlog
+#   - issue closed  -> set Status: Done
+#
+# Requires a repo secret PROJECTS_PAT: a personal access token with `project`
+# scope (and `repo` if it must read private repo data). GITHUB_TOKEN cannot
+# manage Projects, which is why a PAT is required.
+
+on:
+  issues:
+    types: [opened, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  sync-board:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PROJECTS_PAT }}
+      OWNER: ${{ github.repository_owner }}
+      BOARD_TITLE: ${{ github.event.repository.name }} Board
+      ISSUE_URL: ${{ github.event.issue.html_url }}
+    steps:
+      - name: Find the repo's project board
+        id: find
+        run: |
+          number=$(gh project list --owner "$OWNER" --format json --limit 100 \
+            | jq -r --arg t "$BOARD_TITLE" '.projects[] | select(.title == $t) | .number' \
+            | head -n 1)
+          if [ -z "$number" ]; then
+            echo "No board named '$BOARD_TITLE' for owner $OWNER; skipping."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "number=$number" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Add to board as Backlog
+        if: github.event.action == 'opened' && steps.find.outputs.found == 'true'
+        env:
+          PROJECT_NUMBER: ${{ steps.find.outputs.number }}
+        run: |
+          gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" --url "$ISSUE_URL"
+          gh project item-edit "$PROJECT_NUMBER" --owner "$OWNER" --url "$ISSUE_URL" \
+            --field Status --value Backlog
+
+      - name: Mark Done
+        if: github.event.action == 'closed' && steps.find.outputs.found == 'true'
+        env:
+          PROJECT_NUMBER: ${{ steps.find.outputs.number }}
+        run: |
+          # item-add is idempotent, so this also covers issues opened before
+          # the harness was installed.
+          gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" --url "$ISSUE_URL"
+          gh project item-edit "$PROJECT_NUMBER" --owner "$OWNER" --url "$ISSUE_URL" \
+            --field Status --value Done
